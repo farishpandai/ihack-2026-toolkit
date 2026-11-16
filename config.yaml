@@ -1,0 +1,40 @@
+# Shared configuration for the toolkit scripts. Fill this in during briefing —
+# ad_runner.py, service_healthcheck.py, and alert_notify.sh all read from here
+# instead of needing their source edited on event day.
+
+team:
+  team_id: 99          # Your own team number (used to exclude yourself from TARGETS)
+  team_token: "YOUR_TEAM_TOKEN_HERE"
+
+competition:
+  num_teams: 30
+  ip_template: "10.10.{}.1"   # {} is replaced with each team's number
+  flag_regex: 'IHACK\{[a-zA-Z0-9_\-]+\}'
+  submit_url: "http://10.10.0.1/api/flags"
+  request_delay: 2.2          # STRICT RULE: >= 2s between requests (anti-DDoS)
+  tick_interval: 60           # Seconds between full attack rounds
+
+# Your own exposed services, for service_healthcheck.py and log_watch.sh.
+# host is usually "127.0.0.1" / "localhost" since you're checking your own box.
+services:
+  - name: web
+    host: "127.0.0.1"
+    port: 80
+    http_path: "/"          # set to null to only check the TCP port, no HTTP GET
+  # - name: api
+  #   host: "127.0.0.1"
+  #   port: 8080
+  #   http_path: "/health"
+
+# Common web log locations to tail with log_watch.sh. Not all will exist on
+# your box — log_watch.sh skips any path that isn't there.
+log_paths:
+  - /var/log/nginx/access.log
+  - /var/log/nginx/error.log
+  - /var/log/apache2/access.log
+  - /var/log/apache2/error.log
+  - /var/log/auth.log
+
+# Optional: a Discord/Slack-compatible incoming webhook URL. Leave blank to
+# disable webhook alerts (scripts will just print to stdout instead).
+alert_webhook_url: ""

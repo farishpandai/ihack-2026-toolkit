@@ -1,17 +1,70 @@
 #!/usr/bin/env python3
+"""
+Automated multi-team exploit loop & flag submitter. Config (targets, flag
+regex, submit URL, team token, delay) now lives in config.yaml — edit that at
+briefing instead of this file.
+"""
+import json
 import re
+import sys
 import time
+from pathlib import Path
+
 import requests
 
-# --- CONFIGURATION (Fill in during briefing) ---
-TARGETS = [f"10.10.{i}.1" for i in range(1, 31) if i != 99]  # Exclude your own team ID!
-FLAG_REGEX = r"IHACK\{[a-zA-Z0-9_\-]+\}"                     # Update flag format on event day
-SUBMIT_URL = "http://10.10.0.1/api/flags"                    # Update scoreboard API endpoint
-TEAM_TOKEN = "YOUR_TEAM_TOKEN_HERE"
-TICK_INTERVAL = 60                                           # Seconds between full rounds
-REQUEST_DELAY = 2.2                                          # STRICT RULE: >= 2s delay!
+try:
+    import yaml
+except ImportError:
+    print("[!] PyYAML not installed (pip install pyyaml). Cannot load config.yaml.")
+    sys.exit(1)
 
-submitted_flags = set()
+SCRIPT_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = SCRIPT_DIR / "config.yaml"
+SUBMITTED_FLAGS_PATH = SCRIPT_DIR / "submitted_flags.json"
+
+with open(CONFIG_PATH) as f:
+    CFG = yaml.safe_load(f)
+
+_team_cfg = CFG["team"]
+_comp_cfg = CFG["competition"]
+
+MY_TEAM_ID = _team_cfg["team_id"]
+TEAM_TOKEN = _team_cfg["team_token"]
+
+TARGETS = [
+    _comp_cfg["ip_template"].format(i)
+    for i in range(1, _comp_cfg["num_teams"] + 1)
+    if i != MY_TEAM_ID
+]
+FLAG_REGEX = _comp_cfg["flag_regex"]
+SUBMIT_URL = _comp_cfg["submit_url"]
+TICK_INTERVAL = _comp_cfg["tick_interval"]
+REQUEST_DELAY = _comp_cfg["request_delay"]  # STRICT RULE: >= 2s delay!
+
+if REQUEST_DELAY < 2.0:
+    print(f"[!] request_delay in config.yaml is {REQUEST_DELAY}s — must be >= 2s per the rules. Refusing to start.")
+    sys.exit(1)
+
+
+def load_submitted_flags() -> set:
+    """Load previously-submitted flags from disk so a restart doesn't lose dedup state."""
+    if SUBMITTED_FLAGS_PATH.exists():
+        try:
+            return set(json.loads(SUBMITTED_FLAGS_PATH.read_text()))
+        except Exception:
+            return set()
+    return set()
+
+
+def save_submitted_flags(flags: set):
+    try:
+        SUBMITTED_FLAGS_PATH.write_text(json.dumps(sorted(flags)))
+    except Exception as e:
+        print(f"[!] Could not persist submitted flags: {e}")
+
+
+submitted_flags = load_submitted_flags()
+
 
 def exploit(target_ip: str) -> str:
     """
@@ -22,6 +75,7 @@ def exploit(target_ip: str) -> str:
     # r = requests.get(f"http://{target_ip}:8080/vuln?cmd=cat+/flag.txt", timeout=5)
     # return r.text
     return ""
+
 
 def submit_flag(flag: str):
     if flag in submitted_flags:
@@ -36,11 +90,14 @@ def submit_flag(flag: str):
         )
         print(f"[+] Submitted {flag} -> {res.status_code}: {res.text.strip()}")
         submitted_flags.add(flag)
+        save_submitted_flags(submitted_flags)
     except Exception as e:
         print(f"[-] Flag submit error for {flag}: {e}")
 
+
 def main():
     print(f"[*] Starting A/D runner against {len(TARGETS)} targets (delay={REQUEST_DELAY}s)...")
+    print(f"[*] Loaded {len(submitted_flags)} previously-submitted flag(s) from disk.")
     while True:
         round_start = time.time()
         for ip in TARGETS:
@@ -51,7 +108,7 @@ def main():
                     submit_flag(flag)
             except Exception as e:
                 print(f"[!] Exploit failed on {ip}: {e}")
-            
+
             # Mandatory anti-DDoS rule compliance
             time.sleep(REQUEST_DELAY)
 
@@ -59,6 +116,7 @@ def main():
         sleep_left = max(1, TICK_INTERVAL - elapsed)
         print(f"[*] Cycle complete in {elapsed:.1f}s. Sleeping {sleep_left:.1f}s...")
         time.sleep(sleep_left)
+
 
 if __name__ == "__main__":
     main()
